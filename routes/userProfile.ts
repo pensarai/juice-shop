@@ -7,6 +7,7 @@ import { type Request, type Response, type NextFunction } from 'express'
 import { AllHtmlEntities as Entities } from 'html-entities'
 import config from 'config'
 import fs from 'node:fs/promises'
+import vm from 'node:vm'
 
 import * as challengeUtils from '../lib/challengeUtils'
 import { themes } from '../views/themes/themes'
@@ -58,7 +59,9 @@ export function getUserProfile () {
         if (!code) {
           throw new Error('Username is null')
         }
-        username = eval(code) // eslint-disable-line no-eval
+        const sandbox = Object.create(null)
+        const context = vm.createContext(sandbox)
+        username = vm.runInContext(code, context, { timeout: 500 })
       } catch (err) {
         username = '\\' + username
       }
