@@ -80,11 +80,30 @@ router.post('/', (req: Request<Record<string, unknown>, Record<string, unknown>,
     }
 
     try {
+      const securityAnswer = req.body.securityAnswer
+      if (!securityAnswer) {
+        res.status(401).send('Wrong answer to security question.')
+        return
+      }
+
+      const data = await SecurityAnswerModel.findOne({
+        include: [{
+          model: UserModel,
+          where: { email: loggedInUser.data.email }
+        }]
+      })
+
+      if (!data || security.hmac(securityAnswer) !== data.answer) {
+        res.status(401).send('Wrong answer to security question.')
+        return
+      }
+
       await PrivacyRequestModel.create({
         UserId: loggedInUser.data.id,
         deletionRequested: true
       })
 
+      security.authenticatedUsers.revoke(req.cookies.token)
       res.clearCookie('token')
 
       const themeKey = config.get<string>('application.theme') as keyof typeof themes
@@ -101,11 +120,14 @@ router.post('/', (req: Request<Record<string, unknown>, Record<string, unknown>,
       }
 
       if (req.body.layout) {
-        const filePath: string = path.resolve(req.body.layout).toLowerCase()
+        const viewsDir: string = path.resolve('views')
+        const filePath: string = path.resolve(viewsDir, req.body.layout).toLowerCase()
+        const projectRoot: string = path.resolve('.').toLowerCase()
         const isForbiddenFile: boolean = (filePath.includes('ftp') || filePath.includes('ctf.key') || filePath.includes('encryptionkeys'))
-        if (!isForbiddenFile) {
+        const isOutsideProject: boolean = !filePath.startsWith(projectRoot)
+        if (!isForbiddenFile && !isOutsideProject) {
           res.render('dataErasureResult', {
-            ...req.body,
+            layout: req.body.layout,
             ...themeVars
           }, (error, html) => {
             if (!html || error) {
@@ -121,7 +143,7 @@ router.post('/', (req: Request<Record<string, unknown>, Record<string, unknown>,
         }
       } else {
         res.render('dataErasureResult', {
-          ...req.body,
+          layout: false,
           ...themeVars
         })
       }

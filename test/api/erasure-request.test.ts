@@ -49,7 +49,7 @@ void describe('/dataerasure', () => {
     assert.ok(res.text.includes('Error: Blocked illegal activity'))
   })
 
-  void it('POST erasure request does not actually delete the user', async () => {
+  void it('POST erasure request is rejected without valid security answer', async () => {
     const { token } = await login(app, { email: 'bjoern.kimminich@gmail.com', password: 'bW9jLmxpYW1nQGhjaW5pbW1pay5ucmVvamI=' })
 
     const res = await request(app)
@@ -57,15 +57,37 @@ void describe('/dataerasure', () => {
       .set({ Cookie: 'token=' + token })
       .field('email', 'bjoern.kimminich@gmail.com')
 
+    assert.equal(res.status, 401)
+  })
+
+  void it('POST erasure request with correct security answer does not actually delete the user', async () => {
+    const { token } = await login(app, { email: 'bjoern@owasp.org', password: 'kitten lesser pooch karate buffoon indoors' })
+
+    const res = await request(app)
+      .post('/dataerasure/')
+      .set({ Cookie: 'token=' + token })
+      .send({ email: 'bjoern@owasp.org', securityAnswer: 'Zaya' })
+
     assert.equal(res.status, 200)
     assert.ok(res.headers['content-type']?.includes('text/html'))
 
     const loginRes = await request(app)
       .post('/rest/user/login')
       .set({ 'content-type': 'application/json' })
-      .send({ email: 'bjoern.kimminich@gmail.com', password: 'bW9jLmxpYW1nQGhjaW5pbW1pay5ucmVvamI=' })
+      .send({ email: 'bjoern@owasp.org', password: 'kitten lesser pooch karate buffoon indoors' })
 
     assert.equal(loginRes.status, 200)
+  })
+
+  void it('POST erasure request with wrong security answer is rejected', async () => {
+    const { token } = await login(app, { email: 'bjoern@owasp.org', password: 'kitten lesser pooch karate buffoon indoors' })
+
+    const res = await request(app)
+      .post('/dataerasure/')
+      .set({ Cookie: 'token=' + token })
+      .send({ email: 'bjoern@owasp.org', securityAnswer: 'WRONG_ANSWER' })
+
+    assert.equal(res.status, 401)
   })
 
   void it('POST erasure form  fails on unauthenticated access', async () => {
@@ -76,36 +98,36 @@ void describe('/dataerasure', () => {
     assert.ok(res.text.includes('Error: Blocked illegal activity'))
   })
 
-  void it('POST erasure request with empty layout parameter returns', async () => {
-    const { token } = await login(app, { email: 'bjoern.kimminich@gmail.com', password: 'bW9jLmxpYW1nQGhjaW5pbW1pay5ucmVvamI=' })
+  void it('POST erasure request with empty layout parameter and valid security answer returns', async () => {
+    const { token } = await login(app, { email: 'bjoern@owasp.org', password: 'kitten lesser pooch karate buffoon indoors' })
 
     const res = await request(app)
       .post('/dataerasure/')
       .set({ Cookie: 'token=' + token })
-      .send({ layout: null })
+      .send({ layout: null, securityAnswer: 'Zaya' })
 
     assert.equal(res.status, 200)
   })
 
   void it('POST erasure request with non-existing file path as layout parameter throws error', async () => {
-    const { token } = await login(app, { email: 'bjoern.kimminich@gmail.com', password: 'bW9jLmxpYW1nQGhjaW5pbW1pay5ucmVvamI=' })
+    const { token } = await login(app, { email: 'bjoern@owasp.org', password: 'kitten lesser pooch karate buffoon indoors' })
 
     const res = await request(app)
       .post('/dataerasure/')
       .set({ Cookie: 'token=' + token })
-      .send({ layout: '../this/file/does/not/exist' })
+      .send({ layout: '../this/file/does/not/exist', securityAnswer: 'Zaya' })
 
     assert.equal(res.status, 500)
     assert.ok(res.text.includes('no such file or directory'))
   })
 
   void it('POST erasure request with existing file path as layout parameter returns content truncated', async () => {
-    const { token } = await login(app, { email: 'bjoern.kimminich@gmail.com', password: 'bW9jLmxpYW1nQGhjaW5pbW1pay5ucmVvamI=' })
+    const { token } = await login(app, { email: 'bjoern@owasp.org', password: 'kitten lesser pooch karate buffoon indoors' })
 
     const res = await request(app)
       .post('/dataerasure/')
       .set({ Cookie: 'token=' + token })
-      .send({ layout: '../package.json' })
+      .send({ layout: '../package.json', securityAnswer: 'Zaya' })
 
     assert.equal(res.status, 200)
     assert.ok(res.text.includes('juice-shop'))

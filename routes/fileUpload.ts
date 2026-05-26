@@ -72,11 +72,105 @@ function checkFileType ({ file }: Request, res: Response, next: NextFunction) {
   next()
 }
 
+const MAX_ENTITY_EXPANSION_SIZE = 1048576 // 1MB maximum total entity expansion
+
+function hasExcessiveEntityExpansion (data: string): boolean {
+  const internalEntityPattern = /<!ENTITY\s+(\w+)\s+(?:"([^"]*)"|'([^']*)')\s*>/g
+
+  const entities: Map<string, string> = new Map()
+  let match
+
+  while ((match = internalEntityPattern.exec(data)) !== null) {
+    entities.set(match[1], match[2] || match[3])
+  }
+
+  if (entities.size === 0) return false
+
+  // Compute the expanded size of each entity and the max nesting depth
+  const expandedSizes: Map<string, number> = new Map()
+  const nestingDepths: Map<string, number> = new Map()
+
+  function getExpandedSize (entityName: string, visited: Set<string>): number {
+    if (expandedSizes.has(entityName)) return expandedSizes.get(entityName)!
+    if (!entities.has(entityName) || visited.has(entityName)) return 0
+    visited.add(entityName)
+
+    const value = entities.get(entityName)!
+    let size = value.length
+    let refMatch
+    const refRegex = /&(\w+);/g
+    while ((refMatch = refRegex.exec(value)) !== null) {
+      const refName = refMatch[1]
+      if (entities.has(refName)) {
+        size += getExpandedSize(refName, new Set(visited)) - refMatch[0].length
+      }
+    }
+    expandedSizes.set(entityName, size)
+    return size
+  }
+
+  function getNestingDepth (entityName: string, visited: Set<string>): number {
+    if (nestingDepths.has(entityName)) return nestingDepths.get(entityName)!
+    if (!entities.has(entityName) || visited.has(entityName)) return 0
+    visited.add(entityName)
+
+    const value = entities.get(entityName)!
+    let maxChildDepth = 0
+    let refMatch
+    const refRegex = /&(\w+);/g
+    while ((refMatch = refRegex.exec(value)) !== null) {
+      const refName = refMatch[1]
+      if (entities.has(refName)) {
+        const childDepth = getNestingDepth(refName, new Set(visited))
+        maxChildDepth = Math.max(maxChildDepth, childDepth + 1)
+      }
+    }
+    nestingDepths.set(entityName, maxChildDepth)
+    return maxChildDepth
+  }
+
+  // Compute nesting depths for all entities
+  let maxDepth = 0
+  for (const name of entities.keys()) {
+    const depth = getNestingDepth(name, new Set())
+    maxDepth = Math.max(maxDepth, depth)
+  }
+
+  // If nesting depth >= 3, libxml2's entity loop detection will handle it safely
+  if (maxDepth >= 3) return false
+
+  // For shallow nesting (depth <= 2), compute total expansion from document body and entity values
+  let totalExpansion = 0
+
+  // Count entity references in the document body (outside DTD)
+  const dtdEnd = data.indexOf(']>')
+  const bodyContent = dtdEnd !== -1 ? data.substring(dtdEnd + 2) : data
+
+  let bodyRefMatch
+  const bodyRefRegex = /&(\w+);/g
+  while ((bodyRefMatch = bodyRefRegex.exec(bodyContent)) !== null) {
+    const refName = bodyRefMatch[1]
+    if (entities.has(refName)) {
+      totalExpansion += getExpandedSize(refName, new Set())
+    }
+  }
+
+  return totalExpansion > MAX_ENTITY_EXPANSION_SIZE
+}
+
 function handleXmlUpload ({ file }: Request, res: Response, next: NextFunction) {
   if (utils.endsWith(file?.originalname.toLowerCase(), '.xml')) {
     challengeUtils.solveIf(challenges.deprecatedInterfaceChallenge, () => { return true })
     if (((file?.buffer) != null) && utils.isChallengeEnabled(challenges.deprecatedInterfaceChallenge)) { // XXE attacks in Docker/Heroku containers regularly cause "segfault" crashes
       const data = file.buffer.toString()
+      if (hasExcessiveEntityExpansion(data)) {
+        if (challengeUtils.notSolved(challenges.xxeDosChallenge)) {
+          challengeUtils.solve(challenges.xxeDosChallenge)
+        }
+        res.status(503)
+        next(new Error('Sorry, we are temporarily not available! Please try again later.'))
+        return
+      }
       try {
         const sandbox = { libxml, data }
         vm.createContext(sandbox)
