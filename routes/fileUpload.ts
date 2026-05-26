@@ -106,11 +106,26 @@ function handleXmlUpload ({ file }: Request, res: Response, next: NextFunction) 
   next()
 }
 
+const MAX_YAML_ALIASES = 50
+
+function hasExcessiveAliases (data: string): boolean {
+  const aliasMatches = data.match(/\*\w/g)
+  return aliasMatches != null && aliasMatches.length > MAX_YAML_ALIASES
+}
+
 function handleYamlUpload ({ file }: Request, res: Response, next: NextFunction) {
   if (utils.endsWith(file?.originalname.toLowerCase(), '.yml') || utils.endsWith(file?.originalname.toLowerCase(), '.yaml')) {
     challengeUtils.solveIf(challenges.deprecatedInterfaceChallenge, () => { return true })
     if (((file?.buffer) != null) && utils.isChallengeEnabled(challenges.deprecatedInterfaceChallenge)) {
       const data = file.buffer.toString()
+      if (hasExcessiveAliases(data)) {
+        if (challengeUtils.notSolved(challenges.yamlBombChallenge)) {
+          challengeUtils.solve(challenges.yamlBombChallenge)
+        }
+        res.status(503)
+        next(new Error('Sorry, we are temporarily not available! Please try again later.'))
+        return
+      }
       try {
         const sandbox = { yaml, data }
         vm.createContext(sandbox)
