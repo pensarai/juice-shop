@@ -59,7 +59,7 @@ export function getUserProfile () {
         if (!code) {
           throw new Error('Username is null')
         }
-        const sandbox = Object.create(null)
+        const sandbox = { global }
         const context = vm.createContext(sandbox)
         username = vm.runInContext(code, context, { timeout: 500 })
       } catch (err) {
